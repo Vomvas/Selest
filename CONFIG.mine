@@ -1,0 +1,11 @@
+MY_CFLAGS += -I./mpir -I./local/include -DINSECURE
+MY_LDLIBS += -L./mpir/.libs -L./mpir -Wl,-rpath -Wl,./local/lib -L./local/lib
+ARCH = -march=native
+MY_CFLAGS += -I./local/include
+MY_LDLIBS += -Wl,-rpath -Wl,./local/lib -L./local/lib
+
+# MAX_MOD_SZ (for FHE) must be least and GFP_MOD_SZ (for computation)
+# must be exactly ceil(len(p)/len(word)) for the relevant prime p
+# Default for GFP_MOD_SZ is 2, which is good for 128-bit p
+# Default for MAX_MOD_SZ is 10, which suffices for all Overdrive protocols
+# MOD = -DMAX_MOD_SZ=4 -DGFP_MOD_SZ=2

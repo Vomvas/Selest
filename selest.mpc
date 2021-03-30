@@ -1,0 +1,539 @@
+"""
+MPC implementation of the MUSIC algorithm for DoA estimation
+
+Currently this script only finds the eigenvalues of a given matrix using Gaussian Elimination
+"""
+from configparser import ConfigParser
+import os
+from Compiler import complex, qr_decomposition
+from Compiler.library import *
+from Compiler.types import *
+from Compiler.GC.types import sbitfix, sbitint
+import cmath
+from Compiler.mpc_math import log_fx
+
+CONFIG = os.path.join(os.path.dirname(os.getcwd()), "selest.conf")
+
+if not os.path.isfile(CONFIG):
+    print("WARNING: CONFIG file not found.")
+
+DEBUG = False
+
+config_object = ConfigParser()
+config_object.read(CONFIG)
+try:
+    compile_binary = int(config_object['compile']['binary'])
+except KeyError:
+    compile_binary = 0
+
+# Set the complex scalars value type (sfix for arithmetic compilation, sbitfix for binary compilation)
+if compile_binary:
+    complex.scplx.set_value_type(sbitfix)
+    complex.scplx.value_type.set_precision(24, 32)
+    complex.scplx.value_clear_type.set_precision(24, 32)
+else:
+    if config_object["compile"]["scalar_type"] == "sint":
+        complex.scplx.set_value_type(sint)
+    else:
+        complex.scplx.set_value_type(sfix)
+
+        # Set the floating precision
+        try:
+            # complex.scplx.value_type.set_precision(32, 40)
+            # complex.scplx.value_clear_type.set_precision(32, 40)
+            complex.scplx.value_type.set_precision(24, 32)
+            complex.scplx.value_clear_type.set_precision(24, 32)
+            # complex.scplx.value_type.set_precision(9, 13)
+            # complex.scplx.value_clear_type.set_precision(9, 13)
+        except AttributeError:
+            pass
+        print_float_precision(5)
+
+
+class MusicAlgo(object):
+    """Represents an instance of the MUSIC Algorithm"""
+
+    def __init__(self, n_antennas, navg=10, nsignals=None, qr_iter=5,
+                 single_output=0, detection_mode="selest", batched_executions=1, angle_step=18):
+
+        # Number of players and input per player
+        self.n_antennas = n_antennas
+        self.n_avg = navg
+
+        # Players' input
+        self.player_input = None
+
+        # Covariance Matrix
+        self.cov_mat = None
+        self.masked_cov_mat = None
+
+        # Unitary matrix used to mask the covariance matrix
+        self.unitary_matrix = None
+
+        # Detection mode (textbook music, sec-music, vector projection, kernel approximation, etc)
+        self.detection_mode = detection_mode
+
+        # Batched executions in one MPC circuit to amortize randomness setup, MAC checking and broadcast check overhead
+        self.batched_executions = batched_executions
+
+        # Eigenstructure of covariance matrix
+        self.eigenvalues = None
+        self.eigenvectors = None
+        self.sorted_eigenvalues = None
+        self.noise_eigenvalues = None
+        self.noise_eigenvectors = None
+
+        # QR Algorithm
+        self.qr_iter = qr_iter
+
+        # Number of signals to detect
+        self.nsignals = nsignals
+
+        # Antenna array properties
+
+        # Distance between elements in wavelengths
+        self.ant_dist = 0.5
+        # Angle sweep radius in degrees
+        self.angle_step = angle_step
+        self.angle_radius = range(0, 90, self.angle_step)
+
+        # Output pseudospectrum
+        self.music_spectrum = None
+        self.peak_angle = None
+        self.single_output = single_output
+
+    def get_players_input(self, print_input=False):
+        """
+        Get the inputs from Players; each input is an element of the CplxMatrix line corresponding to that player.
+
+        Input is:
+        X = a(th)*F + W
+
+        where
+        a(th) = f(antenna_loc, DoA)
+        F = IQ samples vector
+        W = Noise Sensed along with signals. If this the elements of W are mean 0, variance sigma^2 the computed
+        eigenvalues are in the metric of (sigma^2)I, otherwise they are in the metric of S_0 where S_0 is the noise
+        covariance matrix.
+        """
+
+        self.player_input = complex.CplxMatrix(self.n_antennas, self.n_avg)
+
+        library.break_point()
+
+        # for pl in range(self.n_antennas):
+        @for_range_opt(self.n_antennas)
+        def _(pl):
+            if complex.scplx.value_type == sbitfix:
+                @for_range(self.n_avg)
+                def _(snap):
+                    self.player_input[pl][snap] = complex.scplx.get_input_from(0)
+            else:
+                @for_range_parallel(self.n_avg, self.n_avg)
+                def _(snap):
+                    self.player_input[pl][snap] = complex.scplx.get_input_from(0)
+        library.break_point()
+        if print_input:
+            print_ln("\nThe input matrix from the players is the following:\n")
+            self.player_input.print_reveal()
+
+    def _get_covariance_matrix_sbitfix(self):
+        """
+        Calculate covariance matrix for sbitfix
+        """
+        assert self.n_avg == 4
+        # Calculate the covariance matrix and average over some number of inputs
+        aggr_cov_mat = complex.CplxMatrix(self.n_antennas, self.n_antennas)
+        aggr_cov_mat1 = self.player_input.get_column(0).covariance()
+        aggr_cov_mat2 = self.player_input.get_column(1).covariance()
+        aggr_cov_mat3 = self.player_input.get_column(2).covariance()
+        aggr_cov_mat4 = self.player_input.get_column(3).covariance()
+        aggr_cov_mat.assign(aggr_cov_mat1 + aggr_cov_mat2 + aggr_cov_mat3 + aggr_cov_mat4)
+
+        self.cov_mat = aggr_cov_mat
+
+    def _get_covariance_matrix_multiarray(self):
+        """
+        Transition to loading the covariance matrix in parallel for n_avg
+        """
+
+        multi_cov_mat = complex.CplxMultiArray((self.n_avg, self.n_antennas, self.n_antennas))
+
+        if self.detection_mode == "text_music":
+            @for_range(self.n_avg)
+            def _(a):
+                multi_cov_mat[a].assign(self.player_input.get_column(a).covariance())
+        else:
+            @for_range_parallel(50, self.n_avg)
+            def _(a):
+                multi_cov_mat[a].assign(self.player_input.get_column(a).covariance())
+
+        self.cov_mat = sum(multi_cov_mat)
+
+    def get_covariance_matrix(self):
+        """
+        Takes as input the players' data and computes the covariance matrix S
+
+        Old approach would increment the covariance matrix and then average;
+        Current approach fills a CplxSubMultiArray of size (n_avg, n_players, n_players),
+        then sums and averages it
+        """
+        if complex.scplx.value_type in [sfix, sint]:
+            self._get_covariance_matrix_multiarray()
+        else:
+            self._get_covariance_matrix_sbitfix()
+
+        if DEBUG:
+            print_ln("Summed cov mat:\n")
+            self.cov_mat.print_reveal()
+
+        if self.detection_mode == "text_music":
+            self.cov_mat /= self.n_avg
+
+        if DEBUG:
+            print_ln("Averaged cov mat:\n")
+            self.cov_mat.print_reveal()
+
+    def get_eigenvalues(self, print_schur_form=False):
+        """
+        Computes and returns the eigenvalues of the covariance matrix S
+
+        Currently implemented using textbook QR Algorithm and Gram Schmidt orthogonization
+        """
+
+        if self.detection_mode == "text_music":
+            self.qr_iter = 3            # QR Algo typically converges in 3 iterations
+
+        qr = qr_decomposition.QRAlgorithm(self.cov_mat, iterations=self.qr_iter)
+
+        self.cov_mat, self.eigenvectors = qr.run()
+        assert self.eigenvectors is not None
+
+        if print_schur_form:
+            print_ln("\nCovariance matrix in Schur's form is the following:\n")
+            self.cov_mat.print_reveal()
+            print_ln("The final matrix ~should be~ upper diagonal and the eigenvalues"
+                     "are the elements of the main diagonal.")
+        self.eigenvalues = Array(self.cov_mat.sizes[0], complex.scplx.value_type)
+
+        @for_range(self.cov_mat.sizes[0])
+        def _(j):
+            self.eigenvalues[j] = self.cov_mat[j][j].re
+
+        # Avoid sorting because QR returns sorted eigenvalues from max to min
+        self.sorted_eigenvalues = self.eigenvalues
+        # # Sort the eigenvalues from minimum to maximum (Hermitian eigenvalues are real)
+        # self.sorted_eigenvalues = Array(self.eigenvalues.length, complex.scplx.value_type)
+        # if compile_binary:
+        #     self.sorted_eigenvalues.assign([x for x in self.eigenvalues])
+        # else:
+        #     self.sorted_eigenvalues.assign(self.eigenvalues.get_vector())
+        # sort(self.sorted_eigenvalues)
+
+        if DEBUG:
+            print_ln("Eigenvalues: %s", self.sorted_eigenvalues.reveal())
+            print_ln("Eigenvectors:\n")
+            self.eigenvectors.print_reveal()
+
+    def get_noise_eigenvalues(self):
+        """Finds the minimum eigenvalue in an array of eigenvalues and its multiplicity within a +/- bias"""
+        assert self.nsignals, "N signals should be known to improve efficiency"
+        # If nsignals is known, take the rest of the eigenvalues (starting from minimum) as noise eigenvalues
+        if self.nsignals:
+            self.noise_eigenvalues = Array(self.sorted_eigenvalues.length - self.nsignals, complex.scplx.value_type)
+
+            @for_range(self.noise_eigenvalues.length)
+            def _(i):
+                self.noise_eigenvalues[i] = self.sorted_eigenvalues[len(self.sorted_eigenvalues)-i-1]
+
+    def get_noise_eigenvectors(self):
+        """Returns a matrix E whose columns are the noise eigenvectors"""
+        self.noise_eigenvectors = complex.CplxMatrix.zeros(self.eigenvectors.rows, self.noise_eigenvalues.length)
+        # self.noise_eigenvectors.assign_all(complex.CplxMatrix.value_type.value_type(0))
+
+        if self.noise_eigenvectors.value_type.value_type == sbitfix:
+            @for_range(self.noise_eigenvectors.col)
+            def _(j):
+                self.noise_eigenvectors.set_column(j, self.eigenvectors.get_column(len(self.eigenvectors) - j - 1))
+            # @for_range(self.noise_eigenvectors.col)
+            # def _(i):
+            #     tmp_vector = complex.CplxArray.zeros(self.noise_eigenvectors.rows)
+            #
+            #     @for_range(self.eigenvalues.length)
+            #     def _(j):
+            #         condition = (self.noise_eigenvalues[i] == self.eigenvalues[j])
+            #         tmp_vector.assign(tmp_vector + (condition * self.eigenvectors.get_column(j)))
+            #
+            #     self.noise_eigenvectors.set_column(i, tmp_vector)
+        else:
+            @for_range_opt(self.noise_eigenvectors.col)
+            def _(j):
+                self.noise_eigenvectors.set_column(j, self.eigenvectors.get_column(len(self.eigenvectors)-j-1))
+
+            # @for_range_parallel(self.noise_eigenvectors.col, self.noise_eigenvectors.col)
+            # def _(i):
+            #     tmp_vector = complex.CplxArray.zeros(self.noise_eigenvectors.rows)
+            #
+            #     @for_range_parallel(self.eigenvalues.length, self.eigenvalues.length)
+            #     def _(j):
+            #         condition = (self.noise_eigenvalues[i] == self.eigenvalues[j])
+            #         tmp_vector.assign(tmp_vector + (condition * self.eigenvectors.get_column(j)))
+            #     self.noise_eigenvectors.set_column(i, tmp_vector)
+
+        if DEBUG:
+            print_ln("Noise Eigenvalues: %s", self.noise_eigenvalues.reveal())
+            print_ln("Noise Eigenvectors:\n")
+            self.noise_eigenvectors.print_reveal()
+
+    def get_signal_angles(self):
+        """
+        Uses the music algorithm formula to compute the angles that maximize the distance with the noise subspace,
+        therefore correspond to the signal sources.
+        """
+
+        mode = self.detection_mode
+
+        # Calculate the power in dB (Equation 6 in the MUSIC whitepaper)
+        all_angles = [ang for ang in self.angle_radius]
+        # ang_fun = complex.CplxMatrix(self.n_antennas, len(all_angles))
+        if complex.scplx.value_type == sbitfix:
+            # Workaround for lack of implementation
+            ang_fun = complex.CplxMatrix(self.n_antennas, len(all_angles), value_type=complex.scplx)
+        elif complex.scplx.value_type in [sfix, sint]:
+            ang_fun = complex.CplxMatrix(self.n_antennas, len(all_angles), value_type=complex.ccplx)
+        else:
+            raise NotImplementedError
+        music_spectrum = Array(len(all_angles), complex.scplx.value_type)
+
+        # Angle function a(th) based on antenna array geometry
+        players_distances = [i * self.ant_dist for i in range(self.n_antennas)]
+        from operator import add
+        start_timer(61)
+        # Calculate the 1-180 angle radius and then average over the requested
+        if complex.scplx.value_type == sint:
+            scale_vector = 1e5
+            for th in all_angles:
+                avg = [0 for _ in players_distances]
+                for next_th in range(th, (th + self.angle_step)):
+                    ang = [cmath.exp(-1j * 2 * cmath.pi * dist * cmath.cos(next_th * cmath.pi / 180)) for dist in
+                           players_distances]
+                    for res in range(len(avg)):
+                        avg[res] += ang[res]
+                avg_steering_vector = [x / self.angle_step for x in avg]
+                avg_steering_vector = [scale_vector * x for x in avg_steering_vector]
+                t = type(avg_steering_vector[0])        # Take built-in complex from first element
+                avg_steering_vector = [t(int(x.real), int(x.imag)) for x in avg_steering_vector]
+                ang_fun.set_column(int(th / self.angle_step), avg_steering_vector)
+        else:
+            for th in all_angles:
+                avg = [0 for _ in players_distances]
+                for next_th in range(th, (th + self.angle_step)):
+                    ang = [cmath.exp(-1j * 2 * cmath.pi * dist * cmath.cos(next_th * cmath.pi / 180)) for dist in
+                           players_distances]
+                    for res in range(len(avg)):
+                        avg[res] += ang[res]
+                avg_steering_vector = [x / self.angle_step for x in avg]
+                ang_fun.set_column(int(th/self.angle_step), avg_steering_vector)
+        stop_timer(61)
+
+        start_timer(62)
+        if mode == "default" or mode == "opt_music":
+            if complex.scplx.value_type == sbitfix:
+                @for_range(len(all_angles))
+                def _(th):
+                    ath_left_mult = ang_fun.get_column(th).conjugate() * self.noise_eigenvectors
+                    ath_right_mult = ath_left_mult.norm_squared()
+                    music_spectrum[th] = ath_right_mult
+            else:
+                @for_range_parallel(20, len(all_angles))
+                def _(th):
+                    # print(ang_fu[th].conjugate().length, self.noise_eigenvectors.sizes[0])
+                    # ath_left_mult = ang_fun[th].conjugate() * self.noise_eigenvectors
+                    ath_left_mult = ang_fun.get_column(th).conjugate() * self.noise_eigenvectors
+                    ath_right_mult = ath_left_mult.norm_squared()
+                    music_spectrum[th] = ath_right_mult
+        elif mode == "text_music":
+            if complex.scplx.value_type == sbitfix:
+                @for_range(len(all_angles))
+                def _(th):
+                    ath_left_mult = ang_fun.get_column(th).conjugate() * self.noise_eigenvectors
+                    ath_right_mult = ath_left_mult.norm_squared()
+                    music_spectrum[th] = 1 / ath_right_mult
+            else:
+                # @for_range_parallel(20, len(all_angles))
+                @for_range(len(all_angles))
+                def _(th):
+                    # print(ang_fu[th].conjugate().length, self.noise_eigenvectors.sizes[0])
+                    # ath_left_mult = ang_fun[th].conjugate() * self.noise_eigenvectors
+                    ath_left_mult = ang_fun.get_column(th).conjugate() * self.noise_eigenvectors
+                    ath_right_mult = ath_left_mult.norm_squared()
+                    music_spectrum[th] = 1 / ath_right_mult
+        elif mode == "signal_subspace":
+            if complex.scplx.value_type == sbitfix:
+                @for_range(len(all_angles))
+                def _(th):
+                    ath_left_mult = ang_fun.get_column(th).conjugate() * self.eigenvectors.get_column(
+                        self.n_antennas - 1)
+                    ath_right_mult = ath_left_mult.square_abs()
+                    music_spectrum[th] = ath_right_mult
+            else:
+                @for_range_parallel(20, len(all_angles))
+                def _(th):
+                    ath_left_mult = ang_fun.get_column(th).conjugate() * self.eigenvectors.get_column(self.n_antennas - 1)
+                    ath_right_mult = ath_left_mult.square_abs()
+                    music_spectrum[th] = ath_right_mult
+        elif mode == "selest":
+            if complex.scplx.value_type == sbitfix:
+                @for_range(len(all_angles))
+                def _(th):
+                    ath_left_mult = ang_fun.get_column(th).conjugate() * self.cov_mat.get_column(0)
+                    ath_right_mult = ath_left_mult.square_abs()
+                    music_spectrum[th] = ath_right_mult
+            else:
+                single_vector = self.cov_mat.get_column(0)
+                @for_range_parallel(len(all_angles), len(all_angles))
+                def _(th):
+                    # print(type(single_vector))
+                    ath_left_mult = ang_fun.get_column(th).conjugate() * single_vector
+                    ath_right_mult = ath_left_mult.square_abs()
+                    music_spectrum[th] = ath_right_mult
+                    # music_spectrum[th] = ath_left_mult[th].square_abs()
+
+        stop_timer(62)
+
+        self.music_spectrum = music_spectrum
+
+        if self.single_output:
+            start_timer(63)
+            if compile_binary:
+                ti = sbitint.get_type(32)
+                tf = sbitfix
+            else:
+                ti = sint
+                tf = sfix
+            peak_angle = Array(1, ti)
+            peak_angle[0] = ti(0)
+            peak_value = Array(1, tf)
+            peak_value[0] = music_spectrum[0]
+            if mode == "default" or mode == "kernel_approx" or mode == "opt_music":
+                @for_range(1, music_spectrum.length)
+                def _(th):
+                    # print_ln("%s", (music_spectrum[th] > music_spectrum[peak_angle[0]]).reveal())
+                    # print(type(th), type(peak_angle[0]))
+                    # print(type((music_spectrum[th] > music_spectrum[peak_angle[0]]).if_else(th, peak_angle[0])))
+                    # peak_angle[0] = (music_spectrum[th] < music_spectrum[peak_angle[0]]).reveal().if_else(th, peak_angle[0])
+                    cond = (music_spectrum[th] < peak_value[0])
+                    curr_angle = ti()
+                    curr_angle.load_other(th)
+                    peak_angle[0] = cond.if_else(curr_angle, peak_angle[0])
+                    peak_value[0] = cond.if_else(music_spectrum[th], peak_value[0])
+            elif mode == "selest" or mode == "signal_subspace" or mode == "text_music":
+                @for_range(1, music_spectrum.length)
+                def _(th):
+                    # print_ln("%s", (music_spectrum[th] > music_spectrum[peak_angle[0]]).reveal())
+                    # print(type(th), type(peak_angle[0]))
+                    # print(type((music_spectrum[th] > music_spectrum[peak_angle[0]]).if_else(th, peak_angle[0])))
+                    # peak_angle[0] = (music_spectrum[th] > music_spectrum[peak_angle[0]]).reveal().if_else(th, peak_angle[0])
+                    cond = (music_spectrum[th] > peak_value[0])
+                    curr_angle = ti()
+                    curr_angle.load_other(th)
+                    peak_angle[0] = cond.if_else(curr_angle, peak_angle[0])
+                    peak_value[0] = cond.if_else(music_spectrum[th], peak_value[0])
+
+            angle_step = regint(self.angle_step)
+            self.peak_angle = angle_step * peak_angle[0].reveal() + angle_step / 2
+            stop_timer(63)
+
+    def output(self):
+        """
+        Output the pseudospectrum, printed or otherwise (currently only print to stdout is implemented)
+        """
+        library.break_point("reveal_output")
+        print_ln("\n########################################")
+        if self.single_output:
+            print_ln("Peak angle: %s", self.peak_angle.reveal())
+        else:
+            if compile_binary:
+                print_str("Music spectrum: [")
+                @for_range(self.music_spectrum.length)
+                def _(i):
+                    print_str("%s ", self.music_spectrum[i].reveal())
+                print_str("]\n")
+            else:
+                print_ln("Music spectrum: %s", self.music_spectrum.reveal())
+        print_ln("########################################\n")
+        library.break_point("reveal_output")
+
+
+def main():
+    """Get players' inputs and control the flow of execution"""
+
+    # Get the configparser object
+    config_object = ConfigParser()
+    config_object.read(CONFIG)
+
+    # If config not found load the defaults
+    try:
+        n_antennas = int(config_object['compile']['n_antennas'])
+        navg = int(config_object['music']['cov_mat_avg'])
+        nsignals = int(config_object['music']['nsignals'])
+        qr_iter = int(config_object['qr_algo']['iterations'])
+        single_output = int(config_object['music']['single_output'])
+        detection_mode = str(config_object['music']['detection_mode'])
+        batched_executions = int(config_object['music']['batched_executions'])
+        angle_step = int(config_object['music']['angle_step'])
+    except KeyError:
+        n_antennas = 4
+        navg = 10
+        nsignals = 1
+        qr_iter = 5
+        single_output = 0
+        detection_mode = "selest"
+        batched_executions = 1
+        angle_step = 18
+
+    # Instantiate MUSIC
+    music = MusicAlgo(n_antennas, navg, nsignals, qr_iter, single_output, detection_mode,
+                      batched_executions, angle_step)
+
+    # Get inputs
+    start_timer(1)
+    print_ln("Loading inputs...")
+    music.get_players_input()
+    stop_timer(1)
+
+    # Form the square covariance Matrix from the players' inputs
+    start_timer(2)
+    print_ln("Forming covariance matrix...")
+    music.get_covariance_matrix()
+    stop_timer(2)
+
+    if music.detection_mode != "selest":
+        # # Compute the eigenvalues of the covariance matrix
+        start_timer(3)
+        print_ln("Computing eigenstructure...")
+        music.get_eigenvalues()
+        stop_timer(3)
+
+        # Find the minimum eigenvalue and its multiplicity in a cluster of certain spread
+        start_timer(4)
+        music.get_noise_eigenvalues()
+        stop_timer(4)
+
+        # Form the matrix E whose columns are the N noise eigenvectors
+        start_timer(5)
+        music.get_noise_eigenvectors()
+        stop_timer(5)
+
+    # Pump the noise eigenvectors through the MUSIC formula and find the argmax angle th
+    start_timer(6)
+    music.get_signal_angles()
+    stop_timer(6)
+
+    # Output pseudospectrum
+    start_timer(7)
+    music.output()
+    stop_timer(7)
+
+
+main()
