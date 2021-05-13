@@ -15,7 +15,6 @@
 
 ```
 cp mp_spdz_files/CONFIG.mine ./MP-SPDZ
-cp mp_spdz_files/selest.conf ./MP-SPDZ
 cp mp_spdz_files/types.py ./MP-SPDZ/Compiler
 cp mp_spdz_files/complex.py ./MP-SPDZ/Compiler
 cp mp_spdz_files/qr_decomposition.py ./MP-SPDZ/Compiler
