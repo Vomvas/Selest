@@ -14,12 +14,12 @@
 - Copy `CONFIG.mine`, libraries and circuit files into the appropriate directories.
 
 ```
-cp CONFIG.mine ./MP-SPDZ
-cp selest.conf ./MP-SPDZ
-cp types.py ./MP-SPDZ/Compiler
-cp complex.py ./MP-SPDZ/Compiler
-cp qr_decomposition.py ./MP-SPDZ/Compiler
-cp selest.mpc ./MP-SPDZ/Programs/Source
+cp mp_spdz_files/CONFIG.mine ./MP-SPDZ
+cp mp_spdz_files/selest.conf ./MP-SPDZ
+cp mp_spdz_files/types.py ./MP-SPDZ/Compiler
+cp mp_spdz_files/complex.py ./MP-SPDZ/Compiler
+cp mp_spdz_files/qr_decomposition.py ./MP-SPDZ/Compiler
+cp mp_spdz_files/selest.mpc ./MP-SPDZ/Programs/Source
 ```
 
 - Compile MP-SPDZ protocols.
@@ -38,7 +38,7 @@ This builds the virtual machine for various MP-SPDZ protocols. For example, for 
 
 ```
 # -t specifies number threads for `make`
-python3.8 setup_mpspdz.py -b mascot shamir -t 2
+python3 setup_mpspdz.py -b mascot shamir -t 2
 ```
 
 - Online setup
@@ -49,7 +49,7 @@ in the mp-spdz `CONFIG.mine` otherwise this will fail. More details can be found
 
 ```
 # -n specifies number of players
-python3.8 setup_mpspdz.py --setup-online -n 5
+python3 setup_mpspdz.py --setup-online -n 5
 ```
 
 - Execute detection
@@ -67,7 +67,7 @@ Useful options (`--help`)
 For example:
 
 ```
-python3.8 ../secure_detection.py --raw-samples-dir ../data/real_trunc32_doa90/ --scaling-factor 30
+python3 ../secure_detection.py --raw-samples-dir ../data/real_doa90 --scaling-factor 30
 ```
 
 Note: We found that `--scaling-factor 30` works best for the given input data.
