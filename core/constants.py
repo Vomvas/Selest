@@ -14,6 +14,7 @@ MP_SPDZ_ROOT = [
 DETECTION_MODES = {
     "opt_music": 0,
     "selest": 1,
+    "text_music": 2,
 }
 
 FIELD = {
