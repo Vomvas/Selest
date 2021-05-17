@@ -286,7 +286,7 @@ class SecureDetection(object):
             log.info("Clearing network latency (%s)...", 'loopback')
             utils.networking.clear_network_latency()
 
-    def get_pseudospectrum(self):
+    def get_pseudospectrum(self, raw=False):
         """ Return a list of power levels in dB across different angle points """
         pseudospectrum = self.parse_output(extract=["Music spectrum"]).get("Music spectrum")
         assert pseudospectrum
@@ -296,6 +296,8 @@ class SecureDetection(object):
             pseudospectrum = [float(x) for x in pseudospectrum]
         elif self.detection_mode in ["opt_music", "kernel_approximation"]:
             pseudospectrum = [1 / float(x) for x in pseudospectrum]
+        if raw:
+            return pseudospectrum
         pseudo_db = [utils.misc.pwr_to_db(x) for x in pseudospectrum]
         return pseudo_db
 

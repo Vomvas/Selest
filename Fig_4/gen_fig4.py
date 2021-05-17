@@ -5,8 +5,7 @@ import glob
 import struct
 import matplotlib.pyplot as plt
 import cmath
-
-from mpc_results import mpc_results
+import subprocess
 
 # samples_dir = "../data/real_doa90"
 all_angles = range(0, 90, 1)
@@ -111,7 +110,37 @@ def get_steering_vector():
     return ang_fun, ang_fun_avg, avged_ang_range
 
 
+mpc_results = {
+    # Figure a
+    "real_doa60": {
+        "opt_music_cmd": "python3 ../secure_detection.py --raw-samples-dir ../data/real_doa60/ --detection-mode opt_music --scaling-factor 34 --print-result-only",
+        "opt_music": [],
+        "opt_music_calibr": 1 / 0.5,
+        "selest_cmd": "python3 ../secure_detection.py --raw-samples-dir ../data/real_doa60/ --scaling-factor 25 --print-result-only",
+        "selest": [],
+        "selest_calibr": 0.4,
+        "savefile": "a.pdf",
+        "actual_angle": 68,
+        "leg_loc": "upper left"
+    },
+    # Figure b
+    "drone_doa45": {
+        "opt_music_cmd": "python3 ../secure_detection.py --raw-samples-dir ../data/drone_doa45/ --detection-mode opt_music --scaling-factor 16 --print-result-only",
+        "opt_music": [],
+        "opt_music_calibr": 1 / 1.2,
+        "selest_cmd": "python3 ../secure_detection.py --raw-samples-dir ../data/drone_doa45/ --scaling-factor 10 --print-result-only",
+        "selest": [],
+        "selest_calibr": 0.55,
+        "savefile": "b.pdf",
+        "actual_angle": 40,
+        "leg_loc": "lower left"
+    }
+}
+
+
 def main():
+
+    print("Generating figure 4...")
 
     for raw_samples in ["real_doa60", "drone_doa45"]:
         samples_dir = "../data/" + raw_samples
@@ -129,6 +158,17 @@ def main():
         for angle in range(ang_fun.shape[0]):
             pwr_n.append(10 * np.log10(abs(1 / (ang_fun[angle].conjugate() @ En @ En.conjugate().T @ ang_fun[angle]))))
 
+        # Run the MPC Protocols to get results
+        print("Running MPC executions to get results, this will take a few minutes...")
+        os.chdir("../MP_SPDZ_online")
+        for det_mode in ["opt_music", "selest"]:
+            mpc_output = subprocess.run(mpc_results[raw_samples][f"{det_mode}_cmd"].split(), capture_output=True, encoding="utf-8")
+            ps = [0, 0, 0, 0, 0]
+            for line in mpc_output.stdout.split("\n"):
+                if "Pseudospectrum: " in line:
+                    ps = line.split("Pseudospectrum: ")[1].strip(" []").split(", ")
+            mpc_results[raw_samples][det_mode] = [mpc_results[raw_samples][f"{det_mode}_calibr"] * float(x) for x in ps]
+        os.chdir("../Fig_4")
         res_dict = mpc_results[raw_samples]
         actual_angle = res_dict["actual_angle"]
         savefile = res_dict["savefile"]

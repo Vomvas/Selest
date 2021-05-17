@@ -15,7 +15,8 @@ log.setLevel(logging.DEBUG)
 
 
 def process_detection(raw_samples_dir, scaling_factor, n_parties, detection_mode, single_output, protocol,
-                      net_lat, setup_online, offline, average_execution, skip_compilation, net_top, parallel):
+                      net_lat, setup_online, offline, average_execution, skip_compilation, net_top, parallel,
+                      print_result_only=False):
     """ Run detection """
 
     sd = SecDec(n_parties, detection_mode=detection_mode, input_samples_dir=raw_samples_dir, protocol=protocol,
@@ -31,6 +32,9 @@ def process_detection(raw_samples_dir, scaling_factor, n_parties, detection_mode
         except KeyboardInterrupt:
             log.info("User Interrupt.")
             sys.exit()
+        if print_result_only:
+            print("Pseudospectrum: ", sd.get_pseudospectrum(raw=True))
+            return
         log.info("Captured output: \n\n%s", utils.io.parse_subprocess_output(sd.output))
         if not single_output:
             sd.plot_pseudospectrum()
@@ -99,11 +103,13 @@ def main():
     parser.add_argument("--skip-compilation", action='store_true',
                         help="Skip circuit compilation to save time. It's up to the user to ensure it's properly "
                              "compiled")
+    parser.add_argument("--print-result-only", action="store_true", help="Only print resulting pseudospectrum for"
+                                                                         " replicability purpuses.")
     args = parser.parse_args()
 
     process_detection(args.raw_samples_dir, args.scaling_factor, args.nparties, args.detection_mode,
                       args.single_output, args.protocol, args.net_lat, args.setup_online, args.offline,
-                      args.average_execution, args.skip_compilation, args.net_top, args.parallel)
+                      args.average_execution, args.skip_compilation, args.net_top, args.parallel,args.print_result_only)
 
 
 if __name__ == "__main__":
