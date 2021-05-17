@@ -8,7 +8,7 @@ SEC_COMP_ROOT = [
 ]
 
 MP_SPDZ_ROOT = [
-    os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "MP-SPDZ"),
+    os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "MP_SPDZ_online"),
 ]
 
 DETECTION_MODES = {
