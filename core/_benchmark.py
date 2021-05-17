@@ -506,7 +506,7 @@ class Benchmark(object):
                 for prot in ['mascot', 'lowgear', 'cowgear', 'semi', 'hemi', 'mal-shamir', 'sy-shamir', 'ps-rep',
                                  'shamir', 'rep3']:
                     for det_mode in ["text_music", "opt_music", "selest"]:
-                        det_mode_alias = "vector_projection" if det_mode == "selest" else det_mode
+                        det_mode_alias = "selest" if det_mode == "selest" else det_mode
                         params = [("protocol", prot), ("detection_mode", det_mode_alias)]
                         outfile = self.get_bench_outfile(params)
                         exec_output = self.get_output_from_outfile(outfile)
