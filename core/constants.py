@@ -62,6 +62,29 @@ REG_EXPS = {
     "DoA": "Peak angle: (.[0-9.]*)",
 }
 
+BENCHMARK_PARAMS = {
+    "music_algo": {
+        "net_lat": int,
+        "preprocessing": bool,
+        "n_parties": int,
+        "comp_field": str,
+        "protocol": str,
+        "net_top": str,
+        "parallel": int,
+        "single_output": bool,
+        "detection_mode": str,
+        "scaling_factor": int,
+    },
+    "benchmark_operations": {
+        "protocol": str,
+        "n_ops": int,
+        "value_type": str,
+        "op_type": str,
+        "loop_type": str,
+        "net_top": str,
+    }
+}
+
 AVG_SEPARATOR = "\n\n" + 25*"#" + " AVG " + 25*"#" + "\n\n"
 PARALL_SEPARATOR = "\n\n" + 25*"#" + " PARALL " + 25*"#" + "\n\n"
 
