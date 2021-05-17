@@ -63,7 +63,7 @@ REG_EXPS = {
 }
 
 BENCHMARK_PARAMS = {
-    "music_algo": {
+    "selest": {
         "net_lat": int,
         "preprocessing": bool,
         "n_parties": int,

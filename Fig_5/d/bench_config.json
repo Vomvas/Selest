@@ -1,1 +1,1 @@
-{"net_lat": [5, 10, 15, 20, 25, 30, 35, 40], "protocol": ["mascot", "mal-shamir", "yao"], "n_parties": ["3"], "preprocessing": ["true"], "detection_mode": ["vector_projection"], "single_output": ["false"], "scaling_factor": ["100"], "net_top": ["direct"]}
+{"net_lat": [5, 10, 15, 20, 25, 30, 35, 40], "protocol": ["mascot", "mal-shamir", "yao"], "n_parties": ["3"], "preprocessing": ["true"], "detection_mode": ["selest"], "single_output": ["false"], "scaling_factor": ["100"], "net_top": ["direct"]}

@@ -104,7 +104,7 @@ def process_run_benchmarks(bench_dir, input_dir, resume=False, overwrite=False, 
 
         b.store_bench_info({"last_ran": str(datetime.now())})
 
-        if b.prog_name == "music_algo":
+        if b.prog_name == "selest":
             process_sec_det_bench(b, input_dir)
         elif b.prog_name == "benchmark_operations":
             process_operations_benchmark(b)
