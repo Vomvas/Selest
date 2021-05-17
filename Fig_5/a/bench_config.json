@@ -1,0 +1,1 @@
+{"net_lat": [0, 1, 2, 3, 4, 5], "n_parties": [3], "protocol": ["mascot", "semi", "mal-shamir", "ps-rep", "rep3", "shamir"], "single_output": [false], "preprocessing": ["true"], "detection_mode": ["vector_projection"], "scaling_factor": ["100"], "net_top": ["direct"]}
