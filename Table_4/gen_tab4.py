@@ -21,3 +21,7 @@ chdir("../Table_4")
 cmd = "python3 ../plot_benchmark.py . --acm-runtimes --table 4"
 
 subprocess.run(cmd.split())
+
+print("For better readability, it is recommended to view this table using gedit or another GUI text editor "
+      "with text wrapping disabled.")
+

@@ -55,7 +55,6 @@ class Benchmark(object):
             raise NotADirectoryError(bench_dir)
         with open(os.path.join(bench_dir, "bench_info.json")) as bir:
             bench_info = json.load(bir)
-            print(bench_info)
         assert (bench_info and bench_info.get("prog_name", None))
         return cls(bench_dir, bench_info.get("prog_name", None), bench_info.get("alias", None),
                    bench_info.get("notes", None), int(bench_info.get("exec_avg", 100)))
