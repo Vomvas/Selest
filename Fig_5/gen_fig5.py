@@ -24,3 +24,4 @@ chdir("../Fig_5")
 
 for bench in ["a", "b", "c", "d"]:
     shcopy(f"{bench}/bench_outputs/plot_{bench}.pdf", f"{bench}.pdf")
+    print(f"Figure {bench}.pdf saved successfully.")
