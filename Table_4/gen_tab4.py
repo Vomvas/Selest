@@ -7,7 +7,7 @@ chdir("../MP_SPDZ_online")
 
 cmd = "python3 ../run_benchmark.py ../Table_4 -oe 1 --input-dir ../data/real_doa90/"
 
-print("Running benchmarks, this will take some time...")
+print("Running benchmarks, this will take several hours...")
 
 try:
     subprocess.run(cmd.split(), capture_output=True)
