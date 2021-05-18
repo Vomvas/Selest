@@ -5,7 +5,7 @@ from shutil import copy as shcopy
 
 chdir("../MP_SPDZ_online")
 
-cmd = "python3 ../run_benchmark.py ../Table_4 -oe 1 --input-dir ../data/real_doa90/"
+cmd = "python3 ../run_benchmark.py ../Table_4 -o --input-dir ../data/real_doa90/"
 
 print("Running benchmarks, this will take several hours...")
 
