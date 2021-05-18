@@ -519,7 +519,7 @@ class Benchmark(object):
             elif papertable == 4:
                 info = {
                     'Protocol': ['MASCOT', 'Lowgear', 'Cowgear', 'Semi', 'Hemi', 'Mal-Shamir', 'Sy-Shamir',
-                                 'Ps-Rep', 'Shamir', 'Rep3'],
+                                 'Ps-Rep', 'Shamir', 'Rep3', 'Yao (2PC)'],
                     '1': [],
                     '2': [],
                     '3': [],
@@ -548,7 +548,7 @@ class Benchmark(object):
                     '12': "Conditioned Offline Cost ($/h)"
                 }
                 for prot in ['mascot', 'lowgear', 'cowgear', 'semi', 'hemi', 'mal-shamir', 'sy-shamir', 'ps-rep',
-                             'shamir', 'rep3']:
+                             'shamir', 'rep3', 'yao']:
                     for out_type in ['Coarse', 'Conditioned']:
                         for ex_par in ['Single', 'Parallel']:
                             params = [
@@ -575,10 +575,16 @@ class Benchmark(object):
                                     info[k].append(round(float(comm_cost*3600), 3))
                     coarse_triples = 114
                     conditioned_triples = 350
-                    info['9'].append(coarse_triples * info['3'][-1] * 3600 / 1000000)
-                    info['11'].append(round(info['9'][-1] * 3 / 190, 3))
-                    info['10'].append(conditioned_triples * info['7'][-1] * 3600 / 1000000)
-                    info['12'].append(round(info['11'][-1] * 3 / 190, 3))
+                    if prot in ["mascot", "lowgear", "cowgear", "semi", "hemi", "mal-shamir"]:
+                        info['9'].append(coarse_triples * info['3'][-1] * 3600 / 1000000)
+                        info['11'].append(round(info['9'][-1] * 3 / 190, 3))
+                        info['10'].append(conditioned_triples * info['7'][-1] * 3600 / 1000000)
+                        info['12'].append(round(info['11'][-1] * 3 / 190, 3))
+                    else:
+                        info['9'].append(" - ")
+                        info['11'].append(" - ")
+                        info['10'].append(" - ")
+                        info['12'].append(" - ")
 
                 for i in range(1, 13):
                     info[legend[str(i)]] = info.pop(str(i))
