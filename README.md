@@ -14,11 +14,11 @@
 - Copy `CONFIG.mine`, libraries and circuit files into the appropriate directories.
 
 ```
-cp mp_spdz_files/CONFIG.mine ./MP-SPDZ
-cp mp_spdz_files/types.py ./MP-SPDZ/Compiler
-cp mp_spdz_files/complex.py ./MP-SPDZ/Compiler
-cp mp_spdz_files/qr_decomposition.py ./MP-SPDZ/Compiler
-cp mp_spdz_files/selest.mpc ./MP-SPDZ/Programs/Source
+cp mp_spdz_files/CONFIG.mine ./MP_SPDZ_online
+cp mp_spdz_files/types.py ./MP_SPDZ_online/Compiler
+cp mp_spdz_files/complex.py ./MP_SPDZ_online/Compiler
+cp mp_spdz_files/qr_decomposition.py ./MP_SPDZ_online/Compiler
+cp mp_spdz_files/selest.mpc ./MP_SPDZ_online/Programs/Source
 ```
 
 - Compile MP-SPDZ protocols.
